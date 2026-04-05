@@ -184,9 +184,11 @@ func (f *FluentdLogger) PreProcess(ctx context.Context, _ string, config *loggin
 	}
 
 	tagTmpl := f.Opts[Tag]
-	if tagTmpl == "" {
-		tagTmpl = "{{.ID}}"
-	}
+
+	// Note: Unlike Docker, we do not apply a default tag template when --log-opt=tag
+	// is not specified, in order to preserve backward compatibility with existing
+	// nerdctl deployments that expect an empty tag.
+
 	tmpl, err := templates.Parse(tagTmpl)
 	if err != nil {
 		return err

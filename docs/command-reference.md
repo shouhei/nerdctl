@@ -372,7 +372,7 @@ Logging flags:
       - :whale: `--log-opt=fluentd-sub-second-precision=<true|false>`: Enable sub-second precision for fluentd. The default value is false.
       - :nerd_face: `--log-opt=fluentd-async-reconnect-interval=<1s|1ms>`: The time to wait before retrying to reconnect to fluentd. The default value is 0s.
       - :nerd_face: `--log-opt=fluentd-request-ack=<true|false>`: Enable request ack for fluentd. The default value is false.
-      - :whale: `--log-opt=tag=<TEMPLATE>`: Specify template to set the fluentd tag. The default value is `{{.ID}}` (first 12 characters of the container ID).
+      - :whale: `--log-opt=tag=<TEMPLATE>`: Specify template to set the fluentd tag. The default value is empty (unlike Docker, which defaults to `{{.ID}}`).
         The following variables are available:
         - `{{.ID}}`: First 12 characters of the container ID
         - `{{.FullID}}`: Full container ID
