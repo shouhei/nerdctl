@@ -17,6 +17,7 @@
 package logging
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -27,15 +28,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/cli/templates"
 	"github.com/fluent/fluent-logger-golang/fluent"
 
+	containerd "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/core/runtime/v2/logging"
 	"github.com/containerd/log"
 
+	"github.com/containerd/nerdctl/v2/pkg/clientutil"
+	"github.com/containerd/nerdctl/v2/pkg/containerutil"
 	"github.com/containerd/nerdctl/v2/pkg/strutil"
 )
 
 type FluentdLogger struct {
+	Address      string
 	Opts         map[string]string
 	fluentClient *fluent.Fluent
 	config       *logging.Config
@@ -100,11 +106,98 @@ func (f *FluentdLogger) Init(dataStore, ns, id string) error {
 	return nil
 }
 
-func (f *FluentdLogger) PreProcess(_ context.Context, _ string, config *logging.Config) error {
+type fluentdIdentifier struct {
+	ID          string
+	FullID      string
+	ImageID     string
+	ImageFullID string
+	ImageName   string
+	Name        string
+	Namespace   string
+}
+
+type builder struct {
+	client *containerd.Client
+}
+
+func newFluentdIdentifierBuilder(client *containerd.Client) builder {
+	return builder{
+		client: client,
+	}
+}
+
+func (f builder) buildIdentifier(ctx context.Context, namespace string, containerID string) (fluentdIdentifier, error) {
+	container, err := f.client.LoadContainer(ctx, containerID)
+	if err != nil {
+		return fluentdIdentifier{}, err
+	}
+	containerLabels, err := container.Labels(ctx)
+	if err != nil {
+		return fluentdIdentifier{}, err
+	}
+	containerInfo, err := container.Info(ctx)
+	if err != nil {
+		return fluentdIdentifier{}, err
+	}
+	containerName := containerutil.GetContainerName(containerLabels)
+	containerShortID := containerID[:12]
+
+	imageName := containerInfo.Image
+
+	var imageFullDigest, imageShortID string
+	if img, err := f.client.GetImage(ctx, imageName); err != nil {
+		log.L.WithError(err).Warnf("failed to get image info for tag template")
+	} else {
+		imgDigest := img.Target().Digest
+		imageFullDigest = imgDigest.String()
+		imageShortID = imgDigest.Encoded()[:12]
+	}
+	return fluentdIdentifier{
+		ID:          containerShortID,
+		FullID:      containerID,
+		ImageID:     imageShortID,
+		ImageFullID: imageFullDigest,
+		ImageName:   containerInfo.Image,
+		Name:        containerName,
+		Namespace:   namespace,
+	}, nil
+}
+
+func (f *FluentdLogger) PreProcess(ctx context.Context, _ string, config *logging.Config) error {
 	if runtime.GOOS == "windows" {
 		// TODO: support fluentd on windows
 		return fmt.Errorf("logging to fluentd is not supported on windows")
 	}
+
+	client, ctx, cancel, err := clientutil.NewClient(ctx, config.Namespace, f.Address)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		cancel()
+		client.Close()
+	}()
+	ib := newFluentdIdentifierBuilder(client)
+	idn, err := ib.buildIdentifier(ctx, config.Namespace, config.ID)
+	if err != nil {
+		return err
+	}
+
+	tagTmpl := f.Opts[Tag]
+	if tagTmpl == "" {
+		tagTmpl = "{{.ID}}"
+	}
+	tmpl, err := templates.Parse(tagTmpl)
+	if err != nil {
+		return err
+	}
+
+	var b bytes.Buffer
+	if err := tmpl.Execute(&b, idn); err != nil {
+		return err
+	}
+	f.Opts[Tag] = b.String()
+
 	fluentConfig, err := parseFluentdConfig(f.Opts)
 	if err != nil {
 		return err

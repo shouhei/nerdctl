@@ -105,7 +105,7 @@ func init() {
 		return &JournaldLogger{Opts: opts, Address: address}, nil
 	}, JournalLogOptsValidate)
 	RegisterDriver("fluentd", func(opts map[string]string, address string) (Driver, error) {
-		return &FluentdLogger{Opts: opts}, nil
+		return &FluentdLogger{Opts: opts, Address: address}, nil
 	}, FluentdLogOptsValidate)
 	RegisterDriver("syslog", func(opts map[string]string, address string) (Driver, error) {
 		return &SyslogLogger{Opts: opts}, nil
